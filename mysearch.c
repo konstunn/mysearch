@@ -6,8 +6,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
-#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 // $ mysearch -n 10 -inputfile test.txt -outputfile result.txt -s needtext
@@ -15,31 +14,87 @@
 // search_time variable
 
 // define thread argument structure
-struct thread_arg
-{
-	char **ofmap;
+struct thread_arg {
+	int ofd;
+	char *str;
 	char **lines_base;
 	char **lines;
 	int lines_cnt;
 };
 
-void* thread_func(void *p)
+struct log_info {
+	int linenum;	
+	int occurs;
+	struct timespec tp; 
+};
+
+struct timespec g_tp;
+
+void* thread_func(void *p) 
 {
-	struct thread_arg *ta = (struct thread_arg*) ta;
+	struct thread_arg *ta = (struct thread_arg*) p;
+
+	const char *needle = ta->str;
+	const char **haystack = (const char **) ta->lines;
+	const char **base = (const char **) ta->lines_base;
+	const int ofd = ta->ofd;
 	const int N = ta->lines_cnt;
 
-	for (int i = 0; i < N; ++i) {
+	struct log_info *li = (struct log_info*) malloc(N * sizeof(struct log_info));
+	memset(li, 0, N * sizeof(struct log_info));
 
+	// search in each line
+	for (int i = 0; i < N; ++i) {
+		const char *s = haystack[i];
+
+		li[i].linenum = haystack - base;	// store line number
+
+		// find all occurences 
+		while ((s = strstr(s, needle)) != NULL) {
+			s++;				// move away from current occurence
+			li[i].occurs ++;	// count occurences 
+
+			// get search time 
+			clock_gettime(CLOCK_REALTIME, & li[i].tp);
+			li[i].tp.tv_nsec -= g_tp.tv_nsec;
+			li[i].tp.tv_sec -= g_tp.tv_sec;
+		}
 	}
+	
+	// log everything to output file 
+	// fully with stdio thread safe funtions
+	FILE* of = fdopen(ofd, "a");
+	if (of == NULL)
+		err(EXIT_FAILURE, "fdopen() failed");
+	
+	flockfile(of);
+
+	// for each line
+	for (int i = 0; i < N; ++i)
+	{
+		if (li[i].occurs > 0)
+			fprintf(of, "line # %d: %d occurences, time %ld s, %ld ns\n", 
+				li[i].linenum, li[i].occurs, li[i].tp.tv_sec, li[i].tp.tv_sec); 
+	}
+	fflush(of);
+
+	funlockfile(of);
+
+	free(li);
+
 	return NULL;
 }
+
 
 int main(int argc, char **argv)
 {
 	int n = 1;
-	char *s, *inputfilename, *outputfilename;
+	char *inputfilename, *outputfilename;
 	
 	// TODO: parse command line options, claim on error
+
+	
+	clock_gettime(CLOCK_REALTIME, & g_tp);
 
 	// open input file
 	FILE* inputfile = fopen(inputfilename, "r");
@@ -77,36 +132,14 @@ int main(int argc, char **argv)
 
 	int xtra_lines = lines_cnt % n;
 
-	// open output file 
+	// create output file 
 	mode_t mode = S_IRWXU | S_IRGRP | S_IROTH;
 	int ofd = creat(outputfilename, mode);
 	if (ofd < 0)
 		err(EXIT_FAILURE, "open(outputfile) failed");
 
-	// get output file size (it should be zero)
-	struct stat st;
-	if (fstat(ofd, & st) < 0)
-		err(EXIT_FAILURE, "fstat() failed");
 
-	int file_len = st.st_size;
-
-	if (file_len == 0) {
-		// extend output file 
-		file_len = 4096; // 4 kilobytes
-		if (ftruncate(ofd, file_len) < 0) 
-			err(EXIT_FAILURE, "ftruncate() failed");
-	}
-
-	// map output file into memory
-	char **addr = (char**) malloc(sizeof(char*));
-	*addr = (char*) mmap(NULL, file_len, PROT_READ | PROT_WRITE, MAP_SHARED, ofd, 0); 	
-	if (*addr == MAP_FAILED)
-		err(EXIT_FAILURE, "mmap() failed");
-	
-	// TODO: create mutex
-	
-	/*	pthread_create
-		create n threads and give a piece of data to each one
+	/*	create n threads and give a piece of data to each one
 			to search string in that piece */
 	
 	pthread_t *tid = (pthread_t*) malloc(sizeof(pthread_t) * n);	
@@ -116,7 +149,7 @@ int main(int argc, char **argv)
 	for (int i = 0; i < n; ++i) 
 	{
 		ta[i].lines_base = lines;
-		ta[i].ofmap = addr;
+		ta[i].ofd = ofd;
 		ta[i].lines = & lines[i*lines_per_thread];
 		ta[i].lines_cnt = lines_per_thread;
 
@@ -126,16 +159,11 @@ int main(int argc, char **argv)
 		pthread_create(& tid[i], NULL, thread_func, & ta[i]);
 	}
 
+
 	// TODO: join with all threads
 	for (int i = 0; i < n; ++i)
-	{
 		pthread_join(tid[i], NULL);
-	}
 
-	// TODO: use strlen(), mremap() and ftruncate() 
-	//		to shrink the file to fit the data
-
-	// TODO: msync(), munmap() ?
 
 	// free memory
 	for (int i = 0; i < lines_cap; ++i)
@@ -143,7 +171,6 @@ int main(int argc, char **argv)
 
 	free(lines);
 	free(tid);
-	free(addr);
 	free(ta);
 
 	return 0;
