@@ -1,15 +1,16 @@
 
-CC=g++
+CC?=gcc
 CFLAGS?=-Wall -g
-#CFLAGS+=-std=gnu99
+CFLAGS+=-std=gnu99
 DESTDIR?=/
 PREFIX?=usr
+
 TARGETS=mysearch
 
 all: $(TARGETS) 
 
 mysearch: mysearch.c
-	$(CC) $(CFLAGS) mysearch.c -o mysearch
+	$(CC) $(CFLAGS) mysearch.c -o mysearch -lpthread
 
 client: client.c
 	$(CC) $(CFLAGS) client.c -o client
