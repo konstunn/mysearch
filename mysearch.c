@@ -1,19 +1,19 @@
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <err.h>
+#include <errno.h>
 #include <string.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <unistd.h>
+#include <getopt.h>
 
-// $ mysearch -n 10 -inputfile test.txt -outputfile result.txt -s needtext
-
-// search_time variable
-
-// define thread argument structure
+// thread argument structure
 struct thread_arg {
 	int ofd;
 	char *str;
@@ -47,7 +47,7 @@ void* thread_func(void *p)
 	for (int i = 0; i < N; ++i) {
 		const char *s = haystack[i];
 
-		li[i].linenum = haystack - base;	// store line number
+		li[i].linenum = & haystack[i] - base + 1;	// store line number
 
 		// find all occurences 
 		while ((s = strstr(s, needle)) != NULL) {
@@ -55,7 +55,11 @@ void* thread_func(void *p)
 			li[i].occurs ++;	// count occurences 
 
 			// get search time 
-			clock_gettime(CLOCK_REALTIME, & li[i].tp);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, & li[i].tp);
+
+			//if (li[i].tp.tv_nsec == g_tp.tv_nsec && li[i].tp.tv_sec == g_tp.tv_sec)
+			//	warnx("no time left, wtf?");
+
 			li[i].tp.tv_nsec -= g_tp.tv_nsec;
 			li[i].tp.tv_sec -= g_tp.tv_sec;
 		}
@@ -70,11 +74,10 @@ void* thread_func(void *p)
 	flockfile(of);
 
 	// for each line
-	for (int i = 0; i < N; ++i)
-	{
+	for (int i = 0; i < N; ++i) {
 		if (li[i].occurs > 0)
-			fprintf(of, "line # %d: %d occurences, time %ld s, %ld ns\n", 
-				li[i].linenum, li[i].occurs, li[i].tp.tv_sec, li[i].tp.tv_sec); 
+			fprintf(of, "line # %d: %d occurences, time %ld us\n", 
+				li[i].linenum, li[i].occurs, li[i].tp.tv_nsec / 1000); 
 	}
 	fflush(of);
 
@@ -85,21 +88,80 @@ void* thread_func(void *p)
 	return NULL;
 }
 
+void usage() {
+	fprintf(stderr, "Usage:\n\t%s -n <number_of_threads> ", program_invocation_short_name);
+	fprintf(stderr, "-inputfile <path> ");
+	fprintf(stderr, "-outputfile <path> -s <string_to_search>\n");
+	exit(EXIT_SUCCESS);	
+}
 
 int main(int argc, char **argv)
 {
 	int n = 1;
-	char *inputfilename, *outputfilename;
-	
-	// TODO: parse command line options, claim on error
+	char inputfilename[BUFSIZ];
+	char outputfilename[BUFSIZ];
+	char searchstr[BUFSIZ];
 
+	// TODO: add the following options?
+	//	- "dryrun"
+	//	- "dump"
+	const struct option longopts[] = {
+		{ "inputfile",	required_argument,	0,	0 },
+		{ "outputfile",	required_argument,	0,	0 },
+		{ 0,			0,					0,	0 }		
+	};
+
+	int longindex;
+	int opt;
+
+	// $ mysearch -n 10 -inputfile test.txt -outputfile result.txt -s needtext
 	
-	clock_gettime(CLOCK_REALTIME, & g_tp);
+	if (argc < 9)
+		usage();
+	
+	opterr = 1;	
+	
+	// get command line options
+	while ((opt = getopt_long_only(argc, argv, ":n:s:", longopts, & longindex)) != -1) {
+		switch (opt)
+		{
+			case 0:		
+				switch (longindex) 
+				{
+					case 0:
+						strcpy(inputfilename, optarg);
+						break;
+					case 1:
+						strcpy(outputfilename, optarg);
+				} 
+				break;
+
+			case 'n': 
+				n = strtol(optarg, NULL, 10);
+				if (n == 0) 
+					errx(EXIT_FAILURE, "invalid integer value %s", optarg);
+				break;
+
+			case 's':
+				strcpy(searchstr, optarg);
+				break;
+
+			case '?':
+				errx(EXIT_FAILURE, "unknown option -%c", optopt);
+				break;
+				
+			case ':':
+				errx(EXIT_FAILURE, "missing option argument -%c", optopt);
+				break;
+		}
+	}
+
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, & g_tp);
 
 	// open input file
 	FILE* inputfile = fopen(inputfilename, "r");
 	if (inputfile == NULL)
-		err(EXIT_FAILURE, "fopen(inputfile) failed");
+		err(EXIT_FAILURE, "unable to open '%s'", inputfilename);
 
 	int lines_cap = 10;
 	int lines_cnt = 0;
@@ -152,6 +214,7 @@ int main(int argc, char **argv)
 		ta[i].ofd = ofd;
 		ta[i].lines = & lines[i*lines_per_thread];
 		ta[i].lines_cnt = lines_per_thread;
+		ta[i].str = searchstr;
 
 		if (i == n-1)
 			ta[i].lines_cnt += xtra_lines;
@@ -166,7 +229,7 @@ int main(int argc, char **argv)
 
 
 	// free memory
-	for (int i = 0; i < lines_cap; ++i)
+	for (int i = 0; i < lines_cnt; ++i)
 		free(lines[i]);
 
 	free(lines);
