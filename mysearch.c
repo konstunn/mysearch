@@ -191,7 +191,7 @@ int main(int argc, char **argv)
 	int xtra_lines = lines_cnt % n;
 
 	// create output file 
-	mode_t mode = S_IRWXU | S_IRGRP | S_IROTH;
+	mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 	int ofd;
 	if ((ofd = creat(outputfilename, mode)) < 0)
 		err(EXIT_FAILURE, "open(outputfile) failed");
