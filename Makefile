@@ -18,10 +18,6 @@ client: client.c
 test: test.c
 	$(CC) $(CFLAGS) test.c -o test
 
-#install: cmux
-	#install -m 0755 cmux $(DESTDIR)/$(PREFIX)/bin/cmux
-	# TODO: just add current directory to PATH
-
 clean:
 	-@rm -vf $(TARGETS) 
 
