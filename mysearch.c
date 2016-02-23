@@ -45,7 +45,7 @@ void* thread_func(void *p)
 
 	// search in each line
 	for (int i = 0; i < N; ++i) {
-		const char *s = haystack[i];
+		char *s = haystack[i];
 
 		li[i].linenum = & haystack[i] - base + 1;	// store line number
 
@@ -56,24 +56,20 @@ void* thread_func(void *p)
 
 			// get search time 
 			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, & li[i].tp);
-
-			//if (li[i].tp.tv_nsec == g_tp.tv_nsec && li[i].tp.tv_sec == g_tp.tv_sec)
-			//	warnx("no time left, wtf?");
-
 			li[i].tp.tv_nsec -= g_tp.tv_nsec;
 			li[i].tp.tv_sec -= g_tp.tv_sec;
 		}
 	}
 	
 	// log everything to output file 
-	// fully with stdio thread safe funtions
+	// using thread safe stdio 
 	FILE* of = fdopen(ofd, "a");
 	if (of == NULL)
 		err(EXIT_FAILURE, "fdopen() failed");
 	
 	flockfile(of);
 
-	// for each line
+	// output search results 
 	for (int i = 0; i < N; ++i) {
 		if (li[i].occurs > 0)
 			fprintf(of, "line # %d: %d occurences, time %ld us\n", 
@@ -101,10 +97,14 @@ int main(int argc, char **argv)
 	char inputfilename[BUFSIZ];
 	char outputfilename[BUFSIZ];
 	char searchstr[BUFSIZ];
+	
+	if (argc < 9) {
+		warnx("too few arguments");
+		usage();
+	}
+	
+	opterr = 1;	
 
-	// TODO: add the following options?
-	//	- "dryrun"
-	//	- "dump"
 	const struct option longopts[] = {
 		{ "inputfile",	required_argument,	0,	0 },
 		{ "outputfile",	required_argument,	0,	0 },
@@ -114,20 +114,13 @@ int main(int argc, char **argv)
 	int longindex;
 	int opt;
 
-	// $ mysearch -n 10 -inputfile test.txt -outputfile result.txt -s needtext
-	
-	if (argc < 9)
-		usage();
-	
-	opterr = 1;	
-	
 	// get command line options
 	while ((opt = getopt_long_only(argc, argv, ":n:s:", longopts, & longindex)) != -1) {
-		switch (opt)
+		switch (opt) 
 		{
 			case 0:		
 				switch (longindex) 
-				{
+				{	// parsing long options
 					case 0:
 						strcpy(inputfilename, optarg);
 						break;
@@ -136,6 +129,9 @@ int main(int argc, char **argv)
 				} 
 				break;
 
+
+			// parsing short options
+			
 			case 'n': 
 				n = strtol(optarg, NULL, 10);
 				if (n == 0) 
@@ -165,12 +161,12 @@ int main(int argc, char **argv)
 
 	int lines_cap = 10;
 	int lines_cnt = 0;
-	char b[BUFSIZ];
+	char buf[BUFSIZ];
 	
 	char **lines = (char**) malloc(lines_cap * sizeof(char*)); 
 
 	// read all lines from input file
-	for (int i = 0; fgets(b, BUFSIZ, inputfile) != NULL; ++i)  
+	for (int i = 0; fgets(buf, BUFSIZ, inputfile) != NULL; ++i)  
 	{
 		lines_cnt ++;
 		if (i == lines_cap) 
@@ -178,8 +174,8 @@ int main(int argc, char **argv)
 			lines_cap *= 2;
 			lines = (char**) realloc(lines, lines_cap * sizeof(char*));
 		}
-		lines[i] = (char*) malloc(strlen(b)+1 * sizeof(char)); 
-		strcpy(lines[i], b);
+		lines[i] = (char*) malloc(strlen(buf)+1 * sizeof(char)); 
+		strcpy(lines[i], buf);
 	}
 
 	// shrink to fit
@@ -196,14 +192,14 @@ int main(int argc, char **argv)
 
 	// create output file 
 	mode_t mode = S_IRWXU | S_IRGRP | S_IROTH;
-	int ofd = creat(outputfilename, mode);
-	if (ofd < 0)
+	int ofd;
+	if ((ofd = creat(outputfilename, mode)) < 0)
 		err(EXIT_FAILURE, "open(outputfile) failed");
 
 
 	/*	create n threads and give a piece of data to each one
 			to search string in that piece */
-	
+
 	pthread_t *tid = (pthread_t*) malloc(sizeof(pthread_t) * n);	
 
 	struct thread_arg *ta = (struct thread_arg*) malloc(n * sizeof(struct thread_arg));
@@ -212,7 +208,7 @@ int main(int argc, char **argv)
 	{
 		ta[i].lines_base = lines;
 		ta[i].ofd = ofd;
-		ta[i].lines = & lines[i*lines_per_thread];
+		ta[i].lines = & lines [ i * lines_per_thread ];
 		ta[i].lines_cnt = lines_per_thread;
 		ta[i].str = searchstr;
 
@@ -223,10 +219,9 @@ int main(int argc, char **argv)
 	}
 
 
-	// TODO: join with all threads
+	// join with all threads
 	for (int i = 0; i < n; ++i)
 		pthread_join(tid[i], NULL);
-
 
 	// free memory
 	for (int i = 0; i < lines_cnt; ++i)
@@ -235,6 +230,9 @@ int main(int argc, char **argv)
 	free(lines);
 	free(tid);
 	free(ta);
+
+	fclose(inputfile);	
+	close(ofd);
 
 	return 0;
 }
