@@ -45,7 +45,7 @@ void* thread_func(void *p)
 
 	// search in each line
 	for (int i = 0; i < N; ++i) {
-		char *s = haystack[i];
+		const char *s = haystack[i];
 
 		li[i].linenum = & haystack[i] - base + 1;	// store line number
 
@@ -67,7 +67,7 @@ void* thread_func(void *p)
 	if (of == NULL)
 		err(EXIT_FAILURE, "fdopen() failed");
 	
-	flockfile(of);
+	//flockfile(of);
 
 	// output search results 
 	for (int i = 0; i < N; ++i) {
@@ -77,7 +77,7 @@ void* thread_func(void *p)
 	}
 	fflush(of);
 
-	funlockfile(of);
+	//funlockfile(of);
 
 	free(li);
 
