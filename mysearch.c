@@ -67,8 +67,6 @@ void* thread_func(void *p)
 	if (of == NULL)
 		err(EXIT_FAILURE, "fdopen() failed");
 	
-	//flockfile(of);
-
 	// output search results 
 	for (int i = 0; i < N; ++i) {
 		if (li[i].occurs > 0)
@@ -76,8 +74,6 @@ void* thread_func(void *p)
 				li[i].linenum, li[i].occurs, li[i].tp.tv_nsec / 1000); 
 	}
 	fflush(of);
-
-	//funlockfile(of);
 
 	free(li);
 
@@ -98,10 +94,10 @@ int main(int argc, char **argv)
 	char outputfilename[BUFSIZ];
 	char searchstr[BUFSIZ];
 	
-	if (argc < 9) {
+	/* if (argc < 9) {
 		warnx("too few arguments");
 		usage();
-	}
+	} */
 	
 	opterr = 1;	
 
